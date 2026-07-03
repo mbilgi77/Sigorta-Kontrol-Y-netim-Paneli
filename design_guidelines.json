@@ -1,0 +1,76 @@
+{
+  "theme": "Light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast)",
+  "design_philosophy": "Authoritative, clear, and highly functional dashboard tailored for insurance data management. Emphasis on fast data scanning and clear state signaling.",
+  "language": "tr",
+  "typography": {
+    "headings": {
+      "family": "Cabinet Grotesk",
+      "weights": ["600", "700", "800"],
+      "usage": "Use tight letter spacing (tracking-tight) for all headings to ensure an authoritative feel."
+    },
+    "body": {
+      "family": "Figtree",
+      "weights": ["400", "500", "600"],
+      "usage": "Clean, legible reading for standard labels and text."
+    },
+    "data_mono": {
+      "family": "IBM Plex Mono",
+      "weights": ["500", "600"],
+      "usage": "For KPIs, record numbers, and numeric tabular data."
+    }
+  },
+  "colors": {
+    "background": "#F9FAFB",
+    "surface": "#FFFFFF",
+    "primary": "#0F172A",
+    "primary_hover": "#1E293B",
+    "secondary": "#64748B",
+    "accent_blue": "#2563EB",
+    "status": {
+      "approved": "#059669",
+      "unapproved": "#E11D48",
+      "warning": "#D97706"
+    },
+    "border": "#E2E8F0"
+  },
+  "layout_and_spacing": {
+    "grid_strategy": "Mode B (Control Room)",
+    "kpi_cards": "Grid with 3 or 4 columns, tight gaps (gap-4 or gap-6). Use flat backgrounds, 1px subtle border, no heavy shadows. Subtle lift and shadow-md on hover.",
+    "tables": "Full width within containers, sticky headers, adequate padding (p-4) per cell, use zebra striping or bottom borders for clear reading.",
+    "forms": "Grid-based layouts for forms (2 columns for desktop) inside a Dialog or Card."
+  },
+  "components": {
+    "buttons": "Flat design with crisp edges. Use primary color (#0F172A) for main CTAs, ghost buttons for secondary actions.",
+    "inputs": "Shadcn default inputs with customized focus rings (focus:ring-2 focus:ring-accent_blue).",
+    "charts": "Shadcn charts (Recharts). Brand distribution should use pie/donut or bar chart. Monthly performance should use stacked bar or multi-line chart.",
+    "dialogs": "Use for Add/Edit forms and delete confirmations. Flat solid surface.",
+    "data_table": "Shadcn Table with integrated filters for Marka, Danışman, and Durum."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "usage": "Stroke width 1.5, matching text color in context."
+  },
+  "media": {
+    "login_background": {
+      "url": "https://images.unsplash.com/photo-1644749700856-a82a92828a1b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzV8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBjYXIlMjBzaG93cm9vbSUyMGludGVyaW9yJTIwYXJjaGl0ZWN0dXJlfGVufDB8fHx8MTc4MjUzNzAxNXww&ixlib=rb-4.1.0&q=85",
+      "description": "Modern automotive showroom interior, used as a subtle background for the admin login screen overlaying with black/50 for contrast."
+    }
+  },
+  "testing": {
+    "data_testid_rules": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case. Example: data-testid='login-submit-button', data-testid='add-record-button', data-testid='delete-confirm-button'."
+  },
+  "instructions_to_main_agent": [
+    "Initialize Tailwind, React, and Shadcn UI.",
+    "Configure Tailwind with the specified colors (slate-900 for primary, emerald-600 for approved, rose-600 for unapproved). Add Cabinet Grotesk, Figtree, and IBM Plex Mono fonts.",
+    "Set up routing for Login (/login) and Dashboard (/)",
+    "Dashboard should have a sidebar or top navbar with user profile/logout, brand logo/title, and Month/Year filter.",
+    "KPI Cards: Total Records, Approved TRAFİK, Approved KASKO, Approved PSA KASKO, Unapproved Count.",
+    "Charts: Unapproved offers grouped by brand (Pie/Donut), and Brand-based totals (Bar chart).",
+    "Tables: Consultant monthly performance, and detailed records list with filters (Brand, Consultant, Status).",
+    "Add/Edit should be a dialog/modal containing the form fields: MARKA, MODEL, DONANIM, ŞASİ, RENK, DANIŞMAN, MÜŞTERİ, TRAFİK status, KASKO status, PSA KASKO status, AÇIKLAMA.",
+    "Implement Excel bulk upload using a file input inside a specific upload modal/dialog.",
+    "Apply data-testid to every button, input, and critical UI element.",
+    "All text and labels MUST be in Turkish."
+  ]
+}
