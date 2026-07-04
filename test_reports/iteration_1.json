@@ -1,0 +1,32 @@
+{
+  "summary": "First-finish smoke tests for Turkish insurance tracking app. Backend: login + JWT works, all CRUD + upload + stats + filters endpoints return 200 with expected fields. Frontend: login flow, dashboard KPIs (5), filters, add-record dialog, and Excel upload dialog all functional. Both integrations working end-to-end (toast 'Kayıt eklendi', '2 kayıt yüklendi' observed; KPIs updated live).",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login with admin@sigorta.com/admin123 returns 200 with token + user (field name 'token', not 'access_token')",
+    "Wrong password -> 401 with Turkish message 'E-posta veya şifre hatalı'",
+    "GET /api/auth/me with Bearer token -> 200 admin user",
+    "GET /api/records without token -> 401 'Yetkisiz'",
+    "POST /api/records creates record with all fields (id + created_at returned)",
+    "GET /api/records lists records (200)",
+    "PUT /api/records/{id} updates record (kasko RED->ONAY, model updated)",
+    "DELETE /api/records/{id} -> {success:true}",
+    "POST /api/records/upload accepts .xlsx multipart with Turkish column headers (ŞASİ, DANIŞMAN, MÜŞTERİ, TRAFİK, AÇIKLAMA) and returns {inserted:2}; 'X' normalized to YOK",
+    "GET /api/stats returns total, trafik_onay, kasko_onay, psa_kasko_onay, unapproved_count, brand_totals, consultants",
+    "GET /api/stats?year=2026&month=7 filters correctly",
+    "GET /api/filters returns markalar + danismanlar distinct lists",
+    "Frontend: /login loads, valid credentials navigate to / (dashboard)",
+    "Dashboard renders KPI cards (kpi-total, kpi-trafik, kpi-kasko, kpi-psa, kpi-unapproved), year/month filters, brand bar chart, unapproved donut, upload + add buttons",
+    "'Yeni Kayıt' dialog opens, saving new record shows 'Kayıt eklendi' toast and increments kpi-total (3 -> 4)",
+    "'Excel Yükle' dialog opens, file selected via hidden input, submit shows '2 kayıt yüklendi' toast and updates dashboard (total 4 -> 6, new brands rendered in chart)"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": [
+    "Minor: login response field is 'token' (frontend already reads it correctly).",
+    "Minor UX: file input for upload is hidden (design). Tests must use state='attached' with set_input_files.",
+    "Minor console warnings only: Recharts width/height=-1 warnings on initial render and shadcn Dialog missing aria-describedby. Non-blocking."
+  ]
+}
