@@ -474,6 +474,39 @@ async def _query_records_filtered(year, month, marka, danisman, durum):
 
 STATUS_LABEL = {"ONAY": "ONAY", "RED": "RED", "YOK": "-"}
 
+def _compute_aggregations(docs):
+    """Compute brand totals, brand unapproved, consultant performance from a list of records."""
+    brand_totals: dict = {}
+    brand_unapproved: dict = {}
+    consultants: dict = {}
+    for d in docs:
+        brand = d.get("marka", "?") or "?"
+        brand_totals[brand] = brand_totals.get(brand, 0) + 1
+        if "RED" in (d.get("trafik"), d.get("kasko"), d.get("psa_kasko")):
+            brand_unapproved[brand] = brand_unapproved.get(brand, 0) + 1
+        c = d.get("danisman", "?") or "?"
+        if c not in consultants:
+            consultants[c] = {
+                "danisman": c, "trafik_onay": 0, "kasko_onay": 0, "psa_kasko_onay": 0,
+                "trafik_red": 0, "kasko_red": 0, "psa_kasko_red": 0, "toplam": 0,
+            }
+        row = consultants[c]
+        row["toplam"] += 1
+        for key in ("trafik", "kasko", "psa_kasko"):
+            v = d.get(key)
+            if v == "ONAY":
+                row[f"{key}_onay"] += 1
+            elif v == "RED":
+                row[f"{key}_red"] += 1
+    brand_totals_list = sorted(
+        [{"marka": k, "adet": v} for k, v in brand_totals.items()], key=lambda x: -x["adet"]
+    )
+    brand_unapproved_list = sorted(
+        [{"marka": k, "adet": v} for k, v in brand_unapproved.items()], key=lambda x: -x["adet"]
+    )
+    consultants_list = sorted(consultants.values(), key=lambda x: -x["toplam"])
+    return brand_totals_list, brand_unapproved_list, consultants_list
+
 @api_router.get("/export/excel")
 async def export_excel(
     year: Optional[int] = None,
@@ -501,9 +534,37 @@ async def export_excel(
             "TARIH": (d.get("created_at") or "")[:10],
         })
     df = pd.DataFrame(rows, columns=["MARKA","MODEL","DONANIM","ŞASİ","RENK","DANIŞMAN","MÜŞTERİ","TRAFİK","KASKO","PSA KASKO","AÇIKLAMA","TARIH"])
+
+    brand_totals, brand_unapproved, consultants = _compute_aggregations(docs)
+
+    df_consultants = pd.DataFrame(
+        [{
+            "DANIŞMAN": c["danisman"],
+            "TRAFİK ONAY": c["trafik_onay"],
+            "KASKO ONAY": c["kasko_onay"],
+            "PSA KASKO ONAY": c["psa_kasko_onay"],
+            "TRAFİK RED": c["trafik_red"],
+            "KASKO RED": c["kasko_red"],
+            "PSA KASKO RED": c["psa_kasko_red"],
+            "TOPLAM": c["toplam"],
+        } for c in consultants],
+        columns=["DANIŞMAN","TRAFİK ONAY","KASKO ONAY","PSA KASKO ONAY","TRAFİK RED","KASKO RED","PSA KASKO RED","TOPLAM"],
+    )
+
+    df_brands = pd.DataFrame(
+        [{
+            "MARKA": b["marka"],
+            "TOPLAM": b["adet"],
+            "ONAYLANMAYAN": next((u["adet"] for u in brand_unapproved if u["marka"] == b["marka"]), 0),
+        } for b in brand_totals],
+        columns=["MARKA","TOPLAM","ONAYLANMAYAN"],
+    )
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="Kayitlar")
+        df_consultants.to_excel(w, index=False, sheet_name="Danisman Performansi")
+        df_brands.to_excel(w, index=False, sheet_name="Marka Toplamlari")
     buf.seek(0)
     fname = f"sigorta-kayitlar-{datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
     return StreamingResponse(
@@ -565,6 +626,69 @@ async def export_pdf(
         sub_style,
     ))
     story.append(Spacer(1, 0.4*cm))
+
+    brand_totals, brand_unapproved, consultants = _compute_aggregations(docs)
+
+    section_style = ParagraphStyle(
+        "sec", parent=styles["Heading2"], fontName=_PDF_FONT_BOLD, fontSize=12,
+        textColor=colors.HexColor("#0f172a"), spaceBefore=6, spaceAfter=4,
+    )
+
+    def _styled_table(data, col_widths, header_align="LEFT", numeric_cols=()):
+        t = Table(data, repeatRows=1, colWidths=col_widths)
+        ts = [
+            ("FONTNAME", (0, 0), (-1, -1), _PDF_FONT),
+            ("FONTNAME", (0, 0), (-1, 0), _PDF_FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for c in numeric_cols:
+            ts.append(("ALIGN", (c, 0), (c, -1), "RIGHT"))
+            ts.append(("FONTNAME", (c, 1), (c, -1), _PDF_FONT))
+        t.setStyle(TableStyle(ts))
+        return t
+
+    # ----- Aylık onay adetleri (Danışman Performansı) -----
+    story.append(Paragraph("Aylık Onay Adetleri (Danışman Performansı)", section_style))
+    cons_header = ["Danışman", "TRAFİK Onay", "KASKO Onay", "PSA KASKO Onay", "Red Toplam", "Toplam"]
+    cons_data = [cons_header]
+    for c in consultants:
+        cons_data.append([
+            c["danisman"],
+            str(c["trafik_onay"]),
+            str(c["kasko_onay"]),
+            str(c["psa_kasko_onay"]),
+            str(c["trafik_red"] + c["kasko_red"] + c["psa_kasko_red"]),
+            str(c["toplam"]),
+        ])
+    if len(cons_data) == 1:
+        cons_data.append(["Kayıt yok", "", "", "", "", ""])
+    story.append(_styled_table(cons_data, [6*cm, 2.6*cm, 2.6*cm, 3.2*cm, 2.6*cm, 2.2*cm], numeric_cols=(1,2,3,4,5)))
+    story.append(Spacer(1, 0.5*cm))
+
+    # ----- Marka bazlı toplamlar -----
+    story.append(Paragraph("Marka Bazlı Toplamlar", section_style))
+    brand_header = ["Marka", "Toplam", "Onaylanmayan"]
+    brand_data = [brand_header]
+    for b in brand_totals:
+        red = next((u["adet"] for u in brand_unapproved if u["marka"] == b["marka"]), 0)
+        brand_data.append([b["marka"], str(b["adet"]), str(red)])
+    if len(brand_data) == 1:
+        brand_data.append(["Kayıt yok", "", ""])
+    story.append(_styled_table(brand_data, [10*cm, 3*cm, 4*cm], numeric_cols=(1, 2)))
+    story.append(Spacer(1, 0.5*cm))
+
+    # ----- Detaylı kayıt listesi -----
+    story.append(Paragraph("Detaylı Kayıt Listesi", section_style))
 
     header = ["Marka", "Model", "Danışman", "Müşteri", "ŞASİ", "TRAFİK", "KASKO", "PSA KASKO", "Tarih"]
     data = [header]
