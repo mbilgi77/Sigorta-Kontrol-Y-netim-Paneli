@@ -56,3 +56,15 @@
 ## Next Actions
 - Kullanıcı testinden sonra danışman listesi ve rol yönetimi eklenebilir
 - Aylık trend grafiği ile karşılaştırmalı analiz
+
+## Changelog
+
+### 2026-02-13 — Combobox + Export
+- **Marka / Donanım / Danışman** artık ayrı seçim listelerinden (`/api/options/{kind}`) geliyor:
+  - Varsayılan markalar: OPEL, CITROEN, PEUGEOT
+  - Varsayılan donanımlar & danışmanlar Excel dosyasından seed edildi
+  - Combobox: mevcut değeri seç, ara veya "Yeni ekle" ile anında liste ekle
+  - Kayıt kaydı sırasında yeni marka/donanım/danışman otomatik listeye eklenir (manuel + Excel yüklemesi)
+- **Excel İndir** ve **PDF İndir** butonları: mevcut ay/yıl + marka/danışman/durum filtrelerine göre indirir.
+  - Excel: `/api/export/excel` (`openpyxl`)
+  - PDF: `/api/export/pdf` (ReportLab, DejaVu font, ONAY yeşil / RED kırmızı renk kodlu)

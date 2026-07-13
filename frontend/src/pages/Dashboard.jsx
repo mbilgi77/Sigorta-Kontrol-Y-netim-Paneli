@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import {
   ShieldCheck, LogOut, Upload, Plus, Search, Pencil, Trash2, Filter,
-  TrendingUp, XCircle, CheckCircle2, LayoutDashboard,
+  TrendingUp, XCircle, CheckCircle2, LayoutDashboard, FileSpreadsheet, FileText,
 } from "lucide-react";
 import RecordDialog from "@/components/RecordDialog";
 import UploadDialog from "@/components/UploadDialog";
@@ -115,6 +115,43 @@ export default function Dashboard() {
     } catch { toast.error("Silinemedi"); }
   };
 
+  const buildExportParams = () => {
+    const p = new URLSearchParams();
+    if (year !== "__all__") p.set("year", year);
+    if (month !== "__all__") p.set("month", month);
+    if (fMarka !== "__all__") p.set("marka", fMarka);
+    if (fDanisman !== "__all__") p.set("danisman", fDanisman);
+    if (fDurum !== "__all__") p.set("durum", fDurum);
+    return p.toString();
+  };
+
+  const downloadBlob = async (path, ext) => {
+    try {
+      const res = await api.get(path, { responseType: "blob" });
+      const blob = new Blob([res.data]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sigorta-kayitlar-${new Date().toISOString().slice(0,10)}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("İndirildi");
+    } catch {
+      toast.error("İndirme başarısız");
+    }
+  };
+
+  const exportExcel = () => {
+    const q = buildExportParams();
+    downloadBlob(`/export/excel${q ? `?${q}` : ""}`, "xlsx");
+  };
+  const exportPdf = () => {
+    const q = buildExportParams();
+    downloadBlob(`/export/pdf${q ? `?${q}` : ""}`, "pdf");
+  };
+
   const openAdd = () => { setEditRec(null); setOpenDialog(true); };
   const openEdit = (r) => { setEditRec(r); setOpenDialog(true); };
 
@@ -173,6 +210,12 @@ export default function Dashboard() {
                 {MONTHS.map((m, i) => <SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>)}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={exportExcel} data-testid="export-excel-button">
+              <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel İndir
+            </Button>
+            <Button variant="outline" onClick={exportPdf} data-testid="export-pdf-button">
+              <FileText className="h-4 w-4 mr-2" /> PDF İndir
+            </Button>
             <Button variant="outline" onClick={() => setOpenUpload(true)} data-testid="upload-button">
               <Upload className="h-4 w-4 mr-2" /> Excel Yükle
             </Button>

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
+import OptionCombobox from "@/components/OptionCombobox";
 
 const empty = {
   marka: "", model: "", donanim: "", sasi: "", renk: "",
@@ -68,7 +69,13 @@ export default function RecordDialog({ open, onOpenChange, record, onSaved }) {
         <form onSubmit={submit} className="grid md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Marka *</Label>
-            <Input value={form.marka} onChange={(e) => set("marka", e.target.value)} data-testid="input-marka" />
+            <OptionCombobox
+              kind="brands"
+              value={form.marka}
+              onChange={(v) => set("marka", v)}
+              placeholder="Marka seçin veya ekleyin"
+              testId="combo-marka"
+            />
           </div>
           <div className="space-y-2">
             <Label>Model</Label>
@@ -76,7 +83,13 @@ export default function RecordDialog({ open, onOpenChange, record, onSaved }) {
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label>Donanım</Label>
-            <Input value={form.donanim} onChange={(e) => set("donanim", e.target.value)} data-testid="input-donanim" />
+            <OptionCombobox
+              kind="donanims"
+              value={form.donanim}
+              onChange={(v) => set("donanim", v)}
+              placeholder="Donanım seçin veya ekleyin"
+              testId="combo-donanim"
+            />
           </div>
           <div className="space-y-2">
             <Label>ŞASİ</Label>
@@ -88,7 +101,13 @@ export default function RecordDialog({ open, onOpenChange, record, onSaved }) {
           </div>
           <div className="space-y-2">
             <Label>Danışman *</Label>
-            <Input value={form.danisman} onChange={(e) => set("danisman", e.target.value)} data-testid="input-danisman" />
+            <OptionCombobox
+              kind="consultants"
+              value={form.danisman}
+              onChange={(v) => set("danisman", v)}
+              placeholder="Danışman seçin veya ekleyin"
+              testId="combo-danisman"
+            />
           </div>
           <div className="space-y-2">
             <Label>Müşteri</Label>

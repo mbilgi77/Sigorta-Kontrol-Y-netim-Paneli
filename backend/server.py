@@ -15,10 +15,18 @@ import bcrypt
 import jwt
 import pandas as pd
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 from starlette.middleware.cors import CORSMiddleware
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 
 # ---- Setup ----
 mongo_url = os.environ["MONGO_URL"]
@@ -101,6 +109,75 @@ class RecordOut(RecordBase):
     id: str
     created_at: str
 
+# ---- Options (markalar / donanimlar / danismanlar) ----
+OPTION_KINDS = {"brands", "donanims", "consultants"}
+
+DEFAULT_BRANDS = ["OPEL", "CITROEN", "PEUGEOT"]
+
+DEFAULT_DONANIMS = [
+    "ALLURE 1.2 PureTech 130hp EAT8 Euro 6.4 (E0)",
+    "ALLURE 1.2 PureTech 130 hp EAT8 6.4 (H0)",
+    "GT 1.2 PureTech 130hp EAT8",
+    "Yeni 3008 e ALLURE 157kW",
+    "VIVARO CARGO 2.2 180 HP AT8 ULTIMATE XL",
+    "CORSA ELEKTRIK GS_V2 (H6)",
+    "CORSA GS 1.2 100HP AT8_V2 (H4)",
+    "CORSA 1.2 145 (136 HP) HYBRID E-DCT6 GS",
+    "ASTRA 1.2 130 HP AT8 GS",
+    "Jumper Van 3.5T L4H2 (15m3) 2.2 BlueHDi 180 AT",
+    "C4 X",
+]
+
+DEFAULT_CONSULTANTS = [
+    "ORHANCAN YILMAZ",
+    "EREN TÜRKAN",
+    "BATUHAN OLGAÇ",
+    "SEHER SÖNMEZ",
+    "PINAR YILDIRIM",
+    "MEHMET ALİ YAĞCI",
+    "BETÜL KARAN",
+    "ORÇUN DEMİRAY",
+]
+
+async def add_option(kind: str, value: str):
+    v = (value or "").strip()
+    if not v or kind not in OPTION_KINDS:
+        return
+    await db.options.update_one(
+        {"kind": kind, "value": v},
+        {"$setOnInsert": {"kind": kind, "value": v, "created_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+
+class OptionBody(BaseModel):
+    value: str
+
+@api_router.get("/options/{kind}")
+async def list_options(kind: str, user=Depends(get_current_user)):
+    if kind not in OPTION_KINDS:
+        raise HTTPException(status_code=400, detail="Geçersiz tür")
+    docs = await db.options.find({"kind": kind}, {"_id": 0}).to_list(2000)
+    values = sorted({d["value"] for d in docs if d.get("value")})
+    return {"kind": kind, "values": values}
+
+@api_router.post("/options/{kind}")
+async def add_option_endpoint(kind: str, body: OptionBody, user=Depends(get_current_user)):
+    if kind not in OPTION_KINDS:
+        raise HTTPException(status_code=400, detail="Geçersiz tür")
+    v = body.value.strip()
+    if not v:
+        raise HTTPException(status_code=400, detail="Boş değer eklenemez")
+    await add_option(kind, v)
+    return {"success": True, "value": v}
+
+@api_router.delete("/options/{kind}/{value}")
+async def delete_option(kind: str, value: str, user=Depends(get_current_user)):
+    if kind not in OPTION_KINDS:
+        raise HTTPException(status_code=400, detail="Geçersiz tür")
+    await db.options.delete_one({"kind": kind, "value": value})
+    return {"success": True}
+
+
 # ---- Auth endpoints ----
 @api_router.post("/auth/login", response_model=LoginResponse)
 async def login(body: LoginRequest):
@@ -176,6 +253,10 @@ async def create_record(body: RecordCreate, user=Depends(get_current_user)):
     doc["created_at"] = now
     await db.records.insert_one(doc)
     doc.pop("_id", None)
+    # auto-add new options
+    await add_option("brands", doc.get("marka", ""))
+    await add_option("donanims", doc.get("donanim", ""))
+    await add_option("consultants", doc.get("danisman", ""))
     return doc
 
 @api_router.put("/records/{record_id}", response_model=RecordOut)
@@ -186,6 +267,9 @@ async def update_record(record_id: str, body: RecordUpdate, user=Depends(get_cur
     update = body.model_dump()
     await db.records.update_one({"id": record_id}, {"$set": update})
     existing.update(update)
+    await add_option("brands", update.get("marka", ""))
+    await add_option("donanims", update.get("donanim", ""))
+    await add_option("consultants", update.get("danisman", ""))
     return existing
 
 @api_router.delete("/records/{record_id}")
@@ -265,6 +349,11 @@ async def upload_records(file: UploadFile = File(...), user=Depends(get_current_
     if docs:
         await db.records.insert_many(docs)
         inserted = len(docs)
+        # collect new options
+        for d in docs:
+            await add_option("brands", d.get("marka", ""))
+            await add_option("donanims", d.get("donanim", ""))
+            await add_option("consultants", d.get("danisman", ""))
     return {"inserted": inserted}
 
 # ---- Stats ----
@@ -357,6 +446,177 @@ async def filters(user=Depends(get_current_user)):
         "danismanlar": sorted([d for d in danismanlar if d]),
     }
 
+
+# ---- Exports ----
+async def _query_records_filtered(year, month, marka, danisman, durum):
+    query: dict = {}
+    if marka:
+        query["marka"] = marka
+    if danisman:
+        query["danisman"] = danisman
+    if durum:
+        query["$or"] = [{"trafik": durum}, {"kasko": durum}, {"psa_kasko": durum}]
+    docs = await db.records.find(query, {"_id": 0}).sort("created_at", -1).to_list(20000)
+    if year or month:
+        filtered = []
+        for d in docs:
+            try:
+                dt = datetime.fromisoformat(d["created_at"])
+            except Exception:
+                continue
+            if year and dt.year != year:
+                continue
+            if month and dt.month != month:
+                continue
+            filtered.append(d)
+        docs = filtered
+    return docs
+
+STATUS_LABEL = {"ONAY": "ONAY", "RED": "RED", "YOK": "-"}
+
+@api_router.get("/export/excel")
+async def export_excel(
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    marka: Optional[str] = None,
+    danisman: Optional[str] = None,
+    durum: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    docs = await _query_records_filtered(year, month, marka, danisman, durum)
+    rows = []
+    for d in docs:
+        rows.append({
+            "MARKA": d.get("marka", ""),
+            "MODEL": d.get("model", ""),
+            "DONANIM": d.get("donanim", ""),
+            "ŞASİ": d.get("sasi", ""),
+            "RENK": d.get("renk", ""),
+            "DANIŞMAN": d.get("danisman", ""),
+            "MÜŞTERİ": d.get("musteri", ""),
+            "TRAFİK": STATUS_LABEL.get(d.get("trafik", "YOK"), d.get("trafik", "")),
+            "KASKO": STATUS_LABEL.get(d.get("kasko", "YOK"), d.get("kasko", "")),
+            "PSA KASKO": STATUS_LABEL.get(d.get("psa_kasko", "YOK"), d.get("psa_kasko", "")),
+            "AÇIKLAMA": d.get("aciklama", ""),
+            "TARIH": (d.get("created_at") or "")[:10],
+        })
+    df = pd.DataFrame(rows, columns=["MARKA","MODEL","DONANIM","ŞASİ","RENK","DANIŞMAN","MÜŞTERİ","TRAFİK","KASKO","PSA KASKO","AÇIKLAMA","TARIH"])
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name="Kayitlar")
+    buf.seek(0)
+    fname = f"sigorta-kayitlar-{datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+# Register a Unicode font once (for Turkish chars in PDF)
+_PDF_FONT = "Helvetica"
+_PDF_FONT_BOLD = "Helvetica-Bold"
+for _c in [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+]:
+    try:
+        if _c.endswith("Bold.ttf"):
+            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", _c))
+            _PDF_FONT_BOLD = "DejaVuSans-Bold"
+        else:
+            pdfmetrics.registerFont(TTFont("DejaVuSans", _c))
+            _PDF_FONT = "DejaVuSans"
+    except Exception:
+        pass
+
+@api_router.get("/export/pdf")
+async def export_pdf(
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    marka: Optional[str] = None,
+    danisman: Optional[str] = None,
+    durum: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    docs = await _query_records_filtered(year, month, marka, danisman, durum)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=1.2*cm, rightMargin=1.2*cm, topMargin=1*cm, bottomMargin=1*cm,
+        title="Sigorta Kontrol Kayitlari",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("t", parent=styles["Title"], fontName=_PDF_FONT_BOLD, fontSize=16, textColor=colors.HexColor("#0f172a"))
+    sub_style = ParagraphStyle("s", parent=styles["Normal"], fontName=_PDF_FONT, fontSize=9, textColor=colors.HexColor("#64748b"))
+
+    story = []
+    filt_bits = []
+    if year: filt_bits.append(f"Yıl: {year}")
+    if month: filt_bits.append(f"Ay: {month}")
+    if marka: filt_bits.append(f"Marka: {marka}")
+    if danisman: filt_bits.append(f"Danışman: {danisman}")
+    if durum: filt_bits.append(f"Durum: {durum}")
+    story.append(Paragraph("Sigorta Kontrol - Kayıt Listesi", title_style))
+    story.append(Paragraph(
+        f"Oluşturulma: {datetime.now().strftime('%d.%m.%Y %H:%M')}  ·  Toplam kayıt: {len(docs)}"
+        + (("  ·  Filtre: " + ", ".join(filt_bits)) if filt_bits else ""),
+        sub_style,
+    ))
+    story.append(Spacer(1, 0.4*cm))
+
+    header = ["Marka", "Model", "Danışman", "Müşteri", "ŞASİ", "TRAFİK", "KASKO", "PSA KASKO", "Tarih"]
+    data = [header]
+    for d in docs:
+        data.append([
+            d.get("marka",""),
+            d.get("model",""),
+            d.get("danisman",""),
+            d.get("musteri",""),
+            d.get("sasi",""),
+            STATUS_LABEL.get(d.get("trafik","YOK"), ""),
+            STATUS_LABEL.get(d.get("kasko","YOK"), ""),
+            STATUS_LABEL.get(d.get("psa_kasko","YOK"), ""),
+            (d.get("created_at") or "")[:10],
+        ])
+
+    table = Table(data, repeatRows=1, colWidths=[2.4*cm, 2.6*cm, 3.6*cm, 3.6*cm, 4.2*cm, 1.8*cm, 1.8*cm, 2.2*cm, 2.0*cm])
+    ts = [
+        ("FONTNAME", (0, 0), (-1, -1), _PDF_FONT),
+        ("FONTNAME", (0, 0), (-1, 0), _PDF_FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (5, 1), (7, -1), "CENTER"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for i, row in enumerate(data[1:], start=1):
+        for col_idx in (5, 6, 7):
+            val = row[col_idx]
+            if val == "ONAY":
+                ts.append(("TEXTCOLOR", (col_idx, i), (col_idx, i), colors.HexColor("#059669")))
+            elif val == "RED":
+                ts.append(("TEXTCOLOR", (col_idx, i), (col_idx, i), colors.HexColor("#e11d48")))
+    table.setStyle(TableStyle(ts))
+    story.append(table)
+
+    doc.build(story)
+    buf.seek(0)
+    fname = f"sigorta-kayitlar-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
 @api_router.get("/")
 async def root():
     return {"message": "Sigorta Kontrol API"}
@@ -368,6 +628,14 @@ async def on_startup():
     await db.records.create_index("marka")
     await db.records.create_index("danisman")
     await db.records.create_index("created_at")
+    await db.options.create_index([("kind", 1), ("value", 1)], unique=True)
+
+    for v in DEFAULT_BRANDS:
+        await add_option("brands", v)
+    for v in DEFAULT_DONANIMS:
+        await add_option("donanims", v)
+    for v in DEFAULT_CONSULTANTS:
+        await add_option("consultants", v)
 
     admin_email = os.environ["ADMIN_EMAIL"].lower().strip()
     admin_password = os.environ["ADMIN_PASSWORD"]
@@ -381,7 +649,6 @@ async def on_startup():
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     else:
-        # sync password to .env value
         if not verify_password(admin_password, existing["password_hash"]):
             await db.users.update_one(
                 {"email": admin_email},
@@ -404,3 +671,4 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
