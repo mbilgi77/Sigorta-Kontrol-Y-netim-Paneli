@@ -576,19 +576,23 @@ async def export_excel(
 # Register a Unicode font once (for Turkish chars in PDF)
 _PDF_FONT = "Helvetica"
 _PDF_FONT_BOLD = "Helvetica-Bold"
-for _c in [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-]:
+_FONT_CANDIDATES = [
+    (str(ROOT_DIR / "fonts" / "DejaVuSans.ttf"), "DejaVuSans", False),
+    (str(ROOT_DIR / "fonts" / "DejaVuSans-Bold.ttf"), "DejaVuSans-Bold", True),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "DejaVuSans", False),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "DejaVuSans-Bold", True),
+]
+for _path, _name, _is_bold in _FONT_CANDIDATES:
     try:
-        if _c.endswith("Bold.ttf"):
-            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", _c))
-            _PDF_FONT_BOLD = "DejaVuSans-Bold"
+        if not os.path.exists(_path):
+            continue
+        pdfmetrics.registerFont(TTFont(_name, _path))
+        if _is_bold:
+            _PDF_FONT_BOLD = _name
         else:
-            pdfmetrics.registerFont(TTFont("DejaVuSans", _c))
-            _PDF_FONT = "DejaVuSans"
-    except Exception:
-        pass
+            _PDF_FONT = _name
+    except Exception as _e:
+        logging.getLogger(__name__).warning(f"PDF font load failed for {_path}: {_e}")
 
 @api_router.get("/export/pdf")
 async def export_pdf(
