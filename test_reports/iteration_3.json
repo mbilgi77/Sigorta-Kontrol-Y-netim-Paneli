@@ -1,0 +1,30 @@
+{
+  "summary": "Verified upload-month bug fix. Backend: 4/4 pytest tests passed (upload with year/month stamps created_at into that period; backward compat with no year/month; invalid month=13 returns 400 with Turkish 'Geçersiz yıl/ay'; /api/stats total increases by inserted count for chosen period). Frontend: Excel Yükle dialog exposes upload-year & upload-month selectors defaulted to current period, submitting with Mart/2025 fires toast '2 kayıt yüklendi (Mart 2025)' and the new rows are visible after switching dashboard month/year filter to Mart 2025.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "UploadDialog & other Dialogs", "issues": ["Radix warning: 'Missing Description or aria-describedby={undefined} for DialogContent' – add DialogDescription for a11y (non-blocking)."]},
+      {"screen": "Dashboard charts", "issues": ["Recharts container logs 'width(-1) and height(-1)' warnings on first paint – add minWidth/minHeight to the ResponsiveContainer parent to silence and avoid layout flash."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_upload_month.py",
+    "/app/test_reports/pytest/pytest_upload_month.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py upload_records: only enters the 'user provided period' branch when BOTH year AND month are truthy. If user sends only year (or only month), it silently falls back to now(). Consider validating: if one is provided without the other, return 400 for clearer UX.",
+    "In-Python filtering by year/month in _query_records_filtered iterates entire collection and parses each created_at with datetime.fromisoformat – with ~321 rows it is fine, but at scale switch to a MongoDB range query on created_at.",
+    "server.py is ~818 lines – consider splitting endpoints into routers/modules (records, stats, upload, export)."
+  ],
+  "updated_files": ["/app/backend/tests/test_upload_month.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@sigorta.com / admin123",
+  "seed_data_creation": "Test rows tagged with unique run-id danisman prefixes were created via upload endpoint during pytest and via the UI test; all TEST_UPLOAD_MONTH_* and UI_TEST_DAN_* records were deleted after the tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix is complete and verified. Backend endpoint POST /api/records/upload accepts optional multipart Form 'year' and 'month'; if both are provided rows get created_at = <year>-<month>-15T12:00:00+00:00. UploadDialog exposes data-testid 'upload-year' and 'upload-month'. Existing tests: /app/backend/tests/test_upload_month.py and /app/backend/tests/test_pdf_export_turkish.py.",
+  "rca of the issue": "Root cause: upload_records() unconditionally set created_at = datetime.now(UTC); dashboard filters (year+month) matched dt.year/dt.month against that, so past-period uploads never appeared under the intended past month. Fix: pass year/month via multipart Form; when both present, stamp created_at with datetime(year, month, 15, 12, 0, tzinfo=UTC).isoformat() (mid-month to avoid TZ edge cases). Reproduction: (a) upload xlsx without year/month → row lives in current month only; (b) upload same xlsx with year=2025 month=3 → row appears when filter=2025/Mart. Mitigation for users: existing wrongly-stamped rows must be manually re-uploaded with the correct year/month, or backfilled by updating created_at directly in Mongo."
+}

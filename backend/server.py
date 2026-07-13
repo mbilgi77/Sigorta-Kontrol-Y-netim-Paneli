@@ -14,7 +14,7 @@ from typing import List, Optional, Literal
 import bcrypt
 import jwt
 import pandas as pd
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -280,7 +280,12 @@ async def delete_record(record_id: str, user=Depends(get_current_user)):
     return {"success": True}
 
 @api_router.post("/records/upload")
-async def upload_records(file: UploadFile = File(...), user=Depends(get_current_user)):
+async def upload_records(
+    file: UploadFile = File(...),
+    year: Optional[int] = Form(None),
+    month: Optional[int] = Form(None),
+    user=Depends(get_current_user),
+):
     content = await file.read()
     try:
         df = pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False)
@@ -309,7 +314,17 @@ async def upload_records(file: UploadFile = File(...), user=Depends(get_current_
         "ACIKLAMA": "aciklama",
     }
 
-    now = datetime.now(timezone.utc).isoformat()
+    # Determine created_at for uploaded rows
+    # If year/month provided by user, treat this batch as belonging to that period
+    # (use 15th of the month, 12:00 UTC — safely inside the month in all timezones).
+    if year and month:
+        try:
+            period_dt = datetime(int(year), int(month), 15, 12, 0, 0, tzinfo=timezone.utc)
+            now = period_dt.isoformat()
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Geçersiz yıl/ay")
+    else:
+        now = datetime.now(timezone.utc).isoformat()
     inserted = 0
     docs = []
     for _, row in df.iterrows():
