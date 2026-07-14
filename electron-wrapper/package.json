@@ -1,0 +1,42 @@
+{
+  "name": "sigorta-kontrol-desktop",
+  "version": "1.0.0",
+  "description": "Sigorta Kontrol Yönetim Paneli - Masaüstü",
+  "main": "main.js",
+  "author": "Sigorta Kontrol",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:portable": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.sigorta.kontrol",
+    "productName": "Sigorta Kontrol",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sigorta Kontrol"
+    }
+  }
+}
